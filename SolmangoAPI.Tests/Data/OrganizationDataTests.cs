@@ -1,5 +1,5 @@
 ﻿using SolmangoAPI.Data;
-using SolmangoAPI.Models;
+using SolmangoNET.Models;
 using Xunit;
 
 namespace SolmangoAPI.Tests.Endpoints;

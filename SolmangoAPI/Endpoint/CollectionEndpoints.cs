@@ -1,7 +1,7 @@
 ﻿using BetterHaveIt.Repositories;
 using Microsoft.AspNetCore.Mvc;
 using Newtonsoft.Json;
-using SolmangoAPI.Models;
+using SolmangoNET.Models;
 
 namespace SolmangoAPI.Endpoint;
 

@@ -1,5 +1,6 @@
 ﻿using Newtonsoft.Json;
 using SolmangoAPI.Models;
+using SolmangoNET.Models;
 
 namespace SolmangoAPI.Data;
 

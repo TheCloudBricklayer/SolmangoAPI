@@ -4,6 +4,7 @@ using Microsoft.Extensions.Caching.Memory;
 using SolmangoAPI.Data;
 using SolmangoAPI.Models;
 using SolmangoNET;
+using SolmangoNET.Models;
 using SolmangoNET.Rpc;
 using Solnet.Rpc;
 using Solnet.Wallet;
