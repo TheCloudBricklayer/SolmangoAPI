@@ -10,20 +10,29 @@ using Solnet.Wallet;
 
 namespace SolmangoAPI.Endpoint;
 
-public class ApiEndpoints : IEndpointDefinition, IEndpointShutdownHandler
+public class OrganizationEndpoints : IEndpointDefinition, IEndpointShutdownHandler
 {
+    private CollectionModel? collection;
+
     public void DefineEndpoints(WebApplication app)
     {
         app.MapGet("api/organization/status", HandleGETStatusEndpoint).AllowAnonymous();
-        app.MapGet("api/organization/collection", HandleGETCollectionEndpoint).AllowAnonymous();
-        app.MapGet("api/organization/members", HandleGETMemberEndpoint).AllowAnonymous();
         app.MapPost("api/organization/vote", HandlePOSTVoteEndpoint);
+
+        app.MapGet("api/organization/members", HandleGETMemberEndpoint).AllowAnonymous();
         app.MapPut("api/organization/members", HandlePUTMember);
         app.MapDelete("api/organization/members", HandleDELETEMember);
     }
 
     public void DefineServices(IServiceCollection services, IConfiguration configuration)
     {
+        collection = new CollectionModel()
+        {
+            Name = configuration.GetValue<string>("Collection:Name"),
+            Symbol = configuration.GetValue<string>("Collection:Symbol"),
+            Description = configuration.GetValue<string>("Collection:Description"),
+            Supply = configuration.GetValue<int>("Collection:TotalSupply")
+        };
         var organizationRepository = new RepositoryJson<OrganizationData>(configuration.GetSection("Preferences:OrganizationFilePath").Get<string>());
         var collectionRepository = new RepositoryJson<CollectionData>(configuration.GetSection("Preferences:CollectionFilePath").Get<string>());
 
@@ -35,11 +44,11 @@ public class ApiEndpoints : IEndpointDefinition, IEndpointShutdownHandler
     {
         var orgRepo = services.GetService<IRepository<OrganizationData>>();
         var collectionRepo = services.GetService<IRepository<CollectionData>>();
-        if (orgRepo is not null) orgRepo.Save();
-        if (collectionRepo is not null) collectionRepo.Save();
+        orgRepo?.Save();
+        collectionRepo?.Save();
     }
 
-    private async Task<IResult> HandlePUTMember(ILogger<ApiEndpoints> logger, IServiceProvider serviceProvider, [FromBody] MemberModel member)
+    private async Task<IResult> HandlePUTMember(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider, [FromBody] MemberModel member)
     {
         IMemoryCache? cache = serviceProvider.GetService<IMemoryCache>();
         IRepository<OrganizationData>? organizationRepo = serviceProvider.GetService<IRepository<OrganizationData>>();
@@ -59,7 +68,7 @@ public class ApiEndpoints : IEndpointDefinition, IEndpointShutdownHandler
         return Results.Ok();
     }
 
-    private async Task<IResult> HandleGETStatusEndpoint(ILogger<ApiEndpoints> logger, IServiceProvider serviceProvider)
+    private async Task<IResult> HandleGETStatusEndpoint(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider)
     {
         IMemoryCache? cache = serviceProvider.GetService<IMemoryCache>();
         IRepository<OrganizationData>? collectiveRepo = serviceProvider.GetService<IRepository<OrganizationData>>();
@@ -85,13 +94,14 @@ public class ApiEndpoints : IEndpointDefinition, IEndpointShutdownHandler
             if (oneOf.TryPickT1(out var saturatedEx, out var rpcJobToken)) return Results.Problem("RPC scheduler saturated", null, StatusCodes.Status503ServiceUnavailable, "Internal exception", "Error");
             var res = await rpcJobToken;
             if (!res.WasRequestSuccessfullyHandled) return Results.Problem($"RPC error[{res.ServerErrorCode}]: {res.Reason}", null, StatusCodes.Status502BadGateway, "RPC exception", "Error");
-            balance = res.Result.Value;
+            balance = (ulong)(res.Result.Value * (configuration.GetValue<ulong>("Preferences:OrganizationPercentage") / 100F));
             cache.Set(Resource.Balance.KEY, balance, TimeSpan.FromSeconds(Resource.Balance.CACHE_TIME_S));
         }
-        return Results.Ok(new OrganizationStatusModel() { Balance = balance, Votes = collectiveRepo.Data.GetVotePercentages() });
+
+        return Results.Ok(new OrganizationStatusModel() { Collection = collection ?? new CollectionModel(), Balance = balance, Votes = collectiveRepo.Data.GetVotePercentages() });
     }
 
-    private IResult HandleDELETEMember(ILogger<ApiEndpoints> logger, IServiceProvider serviceProvider, [FromQuery] string address)
+    private IResult HandleDELETEMember(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider, [FromQuery] string address)
     {
         IRepository<OrganizationData>? organizationRepo = serviceProvider.GetService<IRepository<OrganizationData>>();
         if (organizationRepo is null)
@@ -102,15 +112,15 @@ public class ApiEndpoints : IEndpointDefinition, IEndpointShutdownHandler
         return Results.Ok();
     }
 
-    private IResult HandleGETCollectionEndpoint(ILogger<ApiEndpoints> logger, IServiceProvider serviceProvider)
-    {
-        IRepository<CollectionData>? collectionRepository = serviceProvider.GetService<IRepository<CollectionData>>();
-        return collectionRepository is null
-            ? Results.Problem("Unable to retrieve required services from backend", null, StatusCodes.Status500InternalServerError, "Resource exception", "Error")
-            : Results.Ok(new CollectionModel() { Name = collectionRepository.Data.Name, Symbol = collectionRepository.Data.Symbol, Mints = collectionRepository.Data.Mints.Count });
-    }
+    //private IResult HandleGETCollectionEndpoint(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider)
+    //{
+    //    IRepository<CollectionData>? collectionRepository = serviceProvider.GetService<IRepository<CollectionData>>();
+    //    return collectionRepository is null
+    //        ? Results.Problem("Unable to retrieve required services from backend", null, StatusCodes.Status500InternalServerError, "Resource exception", "Error")
+    //        : Results.Ok(new CollectionModel() { Name = collectionRepository.Data.Name, Symbol = collectionRepository.Data.Symbol, Mints = collectionRepository.Data.Mints.Count });
+    //}
 
-    private async Task<IResult> HandleGETMemberEndpoint(ILogger<ApiEndpoints> logger, IServiceProvider serviceProvider, [FromQuery] string? address)
+    private IResult HandleGETMemberEndpoint(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider, [FromQuery] string? address)
     {
         IRepository<OrganizationData>? organizationRepo = serviceProvider.GetService<IRepository<OrganizationData>>();
         IRepository<CollectionData>? collectionRepo = serviceProvider.GetService<IRepository<CollectionData>>();
@@ -136,24 +146,13 @@ public class ApiEndpoints : IEndpointDefinition, IEndpointShutdownHandler
             return Results.Ok(new MembersCountersModel() { Count = count, WhitelistedCount = whitelistedCount, TotalPromised = promisedCount });
         }
 
-        var oneOf = rpcScheduler.Schedule(() => Solmango.FilterMintsByOwner(rpcClient, collectionRepo.Data.Mints, new PublicKey(address)));
-        if (oneOf.TryPickT1(out var exception, out var token))
-        {
-            return Results.Problem("RPC scheduler saturated", null, StatusCodes.Status503ServiceUnavailable, "Internal exception", "Error");
-        }
-        var res = await token;
-        if (res.TryPickT1(out var solmangoRpcException, out var mints))
-        {
-            return Results.Problem($"RPC error[{solmangoRpcException.Code}]: {solmangoRpcException.Reason}", null, StatusCodes.Status502BadGateway, "RPC exception", "Error");
-        }
-
         MemberModel? member = organizationRepo.Data.Members.Find(m => m.Address.Equals(address));
         member ??= new MemberModel(address);
 
         return Results.Ok(member);
     }
 
-    private async Task<IResult> HandlePOSTVoteEndpoint(ILogger<ApiEndpoints> logger, IServiceProvider serviceProvider, [FromQuery] string? address, [FromQuery] string? vote)
+    private async Task<IResult> HandlePOSTVoteEndpoint(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider, [FromQuery] string? address, [FromQuery] string? vote)
     {
         if (address is null || vote is null) return Results.Problem("Invalid synthax", null, StatusCodes.Status400BadRequest, "Synthax exception", "Error");
         IRepository<OrganizationData>? organizationRepo = serviceProvider.GetService<IRepository<OrganizationData>>();
