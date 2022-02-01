@@ -13,8 +13,6 @@ namespace SolmangoAPI.Endpoint;
 
 public class OrganizationEndpoints : IEndpointDefinition, IEndpointShutdownHandler
 {
-    private CollectionModel? collection;
-
     public void DefineEndpoints(WebApplication app)
     {
         app.MapGet("api/organization/status", HandleGETStatusEndpoint).AllowAnonymous();
@@ -27,26 +25,17 @@ public class OrganizationEndpoints : IEndpointDefinition, IEndpointShutdownHandl
 
     public void DefineServices(IServiceCollection services, IConfiguration configuration)
     {
-        collection = new CollectionModel()
-        {
-            Name = configuration.GetValue<string>("Collection:Name"),
-            Symbol = configuration.GetValue<string>("Collection:Symbol"),
-            Description = configuration.GetValue<string>("Collection:Description"),
-            Supply = configuration.GetValue<int>("Collection:TotalSupply")
-        };
         var organizationRepository = new RepositoryJson<OrganizationData>(configuration.GetSection("Preferences:OrganizationFilePath").Get<string>());
-        var collectionRepository = new RepositoryJson<CollectionData>(configuration.GetSection("Preferences:CollectionFilePath").Get<string>());
+        var collectionRepository = new RepositoryJson<CollectionModel>(configuration.GetSection("Preferences:CollectionFilePath").Get<string>());
 
-        services.AddSingleton<IRepository<CollectionData>>(collectionRepository);
+        services.AddSingleton<IRepository<CollectionModel>>(collectionRepository);
         services.AddSingleton<IRepository<OrganizationData>>(organizationRepository);
     }
 
     public void OnShutdown(IServiceProvider services)
     {
         var orgRepo = services.GetService<IRepository<OrganizationData>>();
-        var collectionRepo = services.GetService<IRepository<CollectionData>>();
         orgRepo?.Save();
-        collectionRepo?.Save();
     }
 
     private async Task<IResult> HandlePUTMember(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider, [FromBody] MemberModel member)
@@ -72,8 +61,9 @@ public class OrganizationEndpoints : IEndpointDefinition, IEndpointShutdownHandl
     private async Task<IResult> HandleGETStatusEndpoint(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider)
     {
         IMemoryCache? cache = serviceProvider.GetService<IMemoryCache>();
-        IRepository<OrganizationData>? collectiveRepo = serviceProvider.GetService<IRepository<OrganizationData>>();
-        if (collectiveRepo is null)
+        IRepository<OrganizationData>? organizationRepo = serviceProvider.GetService<IRepository<OrganizationData>>();
+        IRepository<CollectionModel>? collectionRepo = serviceProvider.GetService<IRepository<CollectionModel>>();
+        if (organizationRepo is null || collectionRepo is null)
             return Results.Problem("Unable to retrieve required services from backend", null, StatusCodes.Status500InternalServerError, "Resource exception", "Error");
         ulong balance;
         if (cache is not null && cache.TryGetValue(Resource.Balance.KEY, out ulong cachedBalance))
@@ -99,7 +89,7 @@ public class OrganizationEndpoints : IEndpointDefinition, IEndpointShutdownHandl
             cache.Set(Resource.Balance.KEY, balance, TimeSpan.FromSeconds(Resource.Balance.CACHE_TIME_S));
         }
 
-        return Results.Ok(new OrganizationStatusModel() { Collection = collection ?? new CollectionModel(), Balance = balance, Votes = collectiveRepo.Data.GetVotePercentages() });
+        return Results.Ok(new OrganizationStatusModel() { Collection = collectionRepo.Data, Balance = balance, Votes = organizationRepo.Data.GetVotePercentages() });
     }
 
     private IResult HandleDELETEMember(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider, [FromQuery] string address)
