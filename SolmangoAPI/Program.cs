@@ -1,6 +1,8 @@
+using BetterHaveIt.Repositories;
 using HandierCli;
 using SolmangoAPI.Endpoint;
 using SolmangoAPI.Middleware;
+using SolmangoNET.Models;
 using SolmangoNET.Rpc;
 using Solnet.Rpc;
 
@@ -27,6 +29,7 @@ void ConfigureServices(WebApplicationBuilder builder)
     builder.Services.AddSwaggerGen(c => c.OperationFilter<AddRequiredHeaderParameter>());
     builder.Services.AddMemoryCache();
     builder.Services.AddSingleton(ClientFactory.GetClient(cluster));
+    builder.Services.AddSingleton<IRepository<CollectionModel>>(new RepositoryJson<CollectionModel>(builder.Configuration.GetValue<string>("Preferences:CollectionFilePath")));
     builder.Services.AddSingleton(scheduler);
     builder.AddEndpointDefinitionsServices();
     builder.WebHost.ConfigureKestrel(options =>

@@ -25,10 +25,8 @@ public class OrganizationEndpoints : IEndpointDefinition, IEndpointShutdownHandl
 
     public void DefineServices(IServiceCollection services, IConfiguration configuration)
     {
-        var organizationRepository = new RepositoryJson<OrganizationData>(configuration.GetSection("Preferences:OrganizationFilePath").Get<string>());
-        var collectionRepository = new RepositoryJson<CollectionModel>(configuration.GetSection("Preferences:CollectionFilePath").Get<string>());
+        var organizationRepository = new RepositoryJson<OrganizationData>(configuration.GetValue<string>("Preferences:OrganizationFilePath"));
 
-        services.AddSingleton<IRepository<CollectionModel>>(collectionRepository);
         services.AddSingleton<IRepository<OrganizationData>>(organizationRepository);
     }
 
@@ -103,21 +101,12 @@ public class OrganizationEndpoints : IEndpointDefinition, IEndpointShutdownHandl
         return Results.Ok();
     }
 
-    //private IResult HandleGETCollectionEndpoint(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider)
-    //{
-    //    IRepository<CollectionData>? collectionRepository = serviceProvider.GetService<IRepository<CollectionData>>();
-    //    return collectionRepository is null
-    //        ? Results.Problem("Unable to retrieve required services from backend", null, StatusCodes.Status500InternalServerError, "Resource exception", "Error")
-    //        : Results.Ok(new CollectionModel() { Name = collectionRepository.Data.Name, Symbol = collectionRepository.Data.Symbol, Mints = collectionRepository.Data.Mints.Count });
-    //}
-
     private IResult HandleGETMemberEndpoint(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider, [FromQuery] string? address)
     {
         IRepository<OrganizationData>? organizationRepo = serviceProvider.GetService<IRepository<OrganizationData>>();
-        IRepository<CollectionData>? collectionRepo = serviceProvider.GetService<IRepository<CollectionData>>();
         IRpcScheduler? rpcScheduler = serviceProvider.GetService<IRpcScheduler>();
         IRpcClient? rpcClient = serviceProvider.GetService<IRpcClient>();
-        if (organizationRepo is null || rpcScheduler is null || rpcClient is null || collectionRepo is null)
+        if (organizationRepo is null || rpcScheduler is null || rpcClient is null)
         {
             return Results.Problem("Unable to retrieve required services from backend", null, StatusCodes.Status500InternalServerError, "Resource exception", "Error");
         }
@@ -126,15 +115,20 @@ public class OrganizationEndpoints : IEndpointDefinition, IEndpointShutdownHandl
             int count = organizationRepo.Data.Members.Count;
             int whitelistedCount = 0;
             int promisedCount = 0;
+            List<MemberModel> promisedMembers = new List<MemberModel>();
             foreach (var val in organizationRepo.Data.Members)
             {
                 if (val.Whitelisted)
                 {
                     whitelistedCount++;
                 }
+                if (val.Promised > 0)
+                {
+                    promisedMembers.Add(val);
+                }
                 promisedCount += val.Promised;
             }
-            return Results.Ok(new MembersCountersModel() { Count = count, WhitelistedCount = whitelistedCount, TotalPromised = promisedCount });
+            return Results.Ok(new MembersCountersModel() { PromisedMembers = promisedMembers, Count = count, WhitelistedCount = whitelistedCount, TotalPromised = promisedCount });
         }
 
         MemberModel? member = organizationRepo.Data.Members.Find(m => m.Address.Equals(address));

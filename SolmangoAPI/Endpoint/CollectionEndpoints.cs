@@ -18,6 +18,7 @@ public class CollectionEndpoints : IEndpointDefinition, IEndpointShutdownHandler
     public void DefineEndpoints(WebApplication app)
     {
         app.MapGet("api/collection/info", HandleGETMetadata).AllowAnonymous();
+        app.MapGet("api/collection", HandleGETCollectionEndpoint).AllowAnonymous();
     }
 
     public void DefineServices(IServiceCollection services, IConfiguration configuration)
@@ -31,6 +32,14 @@ public class CollectionEndpoints : IEndpointDefinition, IEndpointShutdownHandler
 
     public void OnShutdown(IServiceProvider services)
     {
+    }
+
+    private IResult HandleGETCollectionEndpoint(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider)
+    {
+        IRepository<CollectionModel>? collectionRepository = serviceProvider.GetService<IRepository<CollectionModel>>();
+        return collectionRepository is null
+            ? Results.Problem("Unable to retrieve required services from backend", null, StatusCodes.Status500InternalServerError, "Resource exception", "Error")
+            : Results.Ok(collectionRepository.Data);
     }
 
     private async Task<IResult> HandleGETMetadata(ILogger<OrganizationEndpoints> logger, IServiceProvider serviceProvider, [FromQuery] int id)
